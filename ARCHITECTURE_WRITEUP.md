@@ -28,7 +28,7 @@ The key design choice is that **the database is the source of truth for the diag
 - **Idempotent step writes.** Steps are upserted by `(run_id, name)`, so a retry or resume never creates duplicates.
 
 ## A failure I hit and how I fixed it
-*[Write your own here. Examples that are realistic for this design: the diagram showing stale state after a page reload (fixed by replaying saved steps on connect); duplicate tasks after a retry (fixed by dedupe in step 4); a resumed run repeating finished work (fixed by skipping steps that already have saved output). Describe how you found it, what you changed, and how you tested the fix.]*
+I fixed having to go through a ton of emails, trying to figure out the task you have to do over whatever time span you may have. Instead this Inbox to Action will get your task for you from your notes and your emails.
 
 ## What I would do next
 - Per-step timeouts and a "retry from this step" button
