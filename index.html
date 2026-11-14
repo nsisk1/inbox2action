@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Inbox-to-Action Digest</title>
+<style>
+  :root { --bg:#0f1420; --card:#18202f; --line:#2b3650; --txt:#e8edf7; --mut:#93a0bb; --ok:#2fbf71; --run:#4c8dff; --retry:#f5a524; --deg:#c98bff; --fail:#ef4f5f; --pend:#3a4560; }
+  * { box-sizing:border-box } body { margin:0; font:15px/1.5 system-ui,sans-serif; background:var(--bg); color:var(--txt) }
+  header { padding:20px 28px; border-bottom:1px solid var(--line) } h1 { margin:0; font-size:22px } header p { margin:4px 0 0; color:var(--mut) }
+  nav { display:flex; gap:8px; padding:12px 28px } nav button { background:none; border:1px solid var(--line); color:var(--mut); padding:6px 14px; border-radius:8px; cursor:pointer }
+  nav button.on { background:var(--card); color:var(--txt) }
+  main { padding:0 28px 40px; display:grid; gap:20px; max-width:1100px }
+  section { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px }
+  textarea { width:100%; min-height:150px; background:#0f1523; color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:10px; font:inherit }
+  .row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-top:10px } select,button.go { padding:8px 12px; border-radius:8px; border:1px solid var(--line); background:#0f1523; color:var(--txt) }
+  button.go { background:var(--run); border:none; font-weight:600; cursor:pointer } button.go:disabled { opacity:.5 }
+  .flow { display:flex; align-items:stretch; gap:0; overflow-x:auto; padding:6px 0 }
+  .node { min-width:150px; flex:1; border:2px solid var(--pend); border-radius:12px; padding:10px; cursor:pointer; background:#0f1523; transition:.25s }
+  .node b { display:block; font-size:13px } .node small { color:var(--mut) } .node .badge { font-size:11px; text-transform:uppercase; letter-spacing:.05em }
+  .arrow { align-self:center; color:var(--mut); padding:0 6px; font-size:20px }
+  .success { border-color:var(--ok) } .running { border-color:var(--run); animation:pulse 1s infinite } .retrying { border-color:var(--retry) }
+  .degraded { border-color:var(--deg) } .failed { border-color:var(--fail) }
+  @keyframes pulse { 50% { box-shadow:0 0 0 4px rgba(76,141,255,.25) } }
+  .bar { height:6px; background:var(--pend); border-radius:3px; margin-top:8px; overflow:hidden } .bar i { display:block; height:100%; background:var(--ok) }
+  #detail { color:var(--mut); min-height:70px } #detail h3 { margin:0 0 6px; color:var(--txt) } dl { display:grid; grid-template-columns:110px 1fr; gap:4px 10px; margin:0 } dt { color:var(--mut) }
+  li { margin:6px 0 } .tag { font-size:12px; color:var(--mut) } .hist div { display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--line); cursor:pointer }
+  .legend span { margin-right:14px; font-size:12px; color:var(--mut) } .legend i { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:5px }
+  .hidden { display:none } .how p { color:var(--mut) } .how code { background:#0f1523; padding:1px 5px; border-radius:4px }
+</style>
+</head>
+<body>
+<header><h1>Inbox-to-Action Digest</h1><p>Paste messy notes or an email thread. Get a clean task list, and watch every step run.</p></header>
+<nav><button id="t-app" class="on">App</button><button id="t-how">How it works</button></nav>
+
+<main id="app">
+  <section>
+    <textarea id="text" placeholder="Paste meeting notes or an email thread here…">Weekly sync notes
+Maya will send the revised budget to finance by Friday.
+Action: Dev to fix the login bug before the release.
+Please follow up with the vendor about the contract.
+Maya will send the revised budget to finance by Friday.
+Sam needs to book the venue by Nov 20.</textarea>
+    <div class="row">
+      <label>Failure mode
+        <select id="mode"><option value="none">None (normal run)</option><option value="transient">Transient (AI fails twice, then recovers)</option><option value="hard">Hard outage (falls back to rules)</option></select>
+      </label>
+      <button class="go" id="go">Run</button><span class="tag" id="status"></span>
+    </div>
+  </section>
+  <section><h3 style="margin-top:0">Live run</h3>
+    <div class="legend"><span><i style="background:var(--pend)"></i>pending</span><span><i style="background:var(--run)"></i>running</span><span><i style="background:var(--retry)"></i>retrying</span><span><i style="background:var(--ok)"></i>success</span><span><i style="background:var(--deg)"></i>degraded (fallback)</span><span><i style="background:var(--fail)"></i>failed</span></div>
+    <div class="flow" id="flow"></div><div id="detail">Click a step to see what it did.</div>
+  </section>
+  <section><h3 style="margin-top:0">Your tasks</h3><ul id="tasks"><li class="tag">Nothing yet. Run the app.</li></ul></section>
+  <section class="hist"><h3 style="margin-top:0">Recent runs</h3><div id="hist"></div></section>
+</main>
+
+<main id="how" class="hidden">
+  <section class="how"><h3 style="margin-top:0">Architecture</h3>
+    <p>Browser → <code>POST /api/runs</code> → Express server → 5-step pipeline → Postgres (<code>runs</code>, <code>run_steps</code>). Each step writes its status, timing and output to the database and pushes an event to the browser over Server-Sent Events, which colors the diagram above.</p>
+    <p><b>Retries:</b> the AI step retries up to 3 times with exponential backoff (0.5s, 1s). <b>Fallback:</b> if all attempts fail, a rule-based extractor takes over and the step is marked <i>degraded</i>. <b>Recovery:</b> every finished step is saved, so if the server restarts mid-run, the run resumes from the last saved step instead of starting over.</p>
+    <p>Use the failure mode picker on the App tab to see each behavior live.</p>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let steps = {}, es = null, order = [];
+const colorOf = (s) => s || "";
+
+async function loadPipeline() {
+  order = await (await fetch("/api/pipeline")).json();
+  steps = {}; order.forEach((o) => (steps[o.name] = { name: o.name, label: o.label, status: "pending" }));
+  render();
+}
+function render() {
+  const max = Math.max(1, ...Object.values(steps).map((s) => s.duration_ms || 0));
+  $("flow").innerHTML = order.map((o, i) => {
+    const s = steps[o.name];
+    return (i ? '<div class="arrow">→</div>' : "") +
+      `<div class="node ${colorOf(s.status)}" data-n="${o.name}"><span class="badge">${s.status}${s.attempts > 1 ? " · try " + s.attempts : ""}</span><b>${o.label}</b>
+      <small>${s.duration_ms != null ? s.duration_ms + " ms" : "&nbsp;"}</small><div class="bar"><i style="width:${s.duration_ms ? Math.max(6, (s.duration_ms / max) * 100) : 0}%"></i></div></div>`;
+  }).join("");
+  document.querySelectorAll(".node").forEach((n) => (n.onclick = () => showDetail(n.dataset.n)));
+}
+function showDetail(n) {
+  const s = steps[n];
+  $("detail").innerHTML = `<h3>${s.label}</h3><dl><dt>Status</dt><dd>${s.status}</dd><dt>Attempts</dt><dd>${s.attempts || 0}</dd><dt>Duration</dt><dd>${s.duration_ms ?? "–"} ms</dd>
+  <dt>Input</dt><dd>${esc(s.input_summary || "–")}</dd><dt>Output</dt><dd>${esc(s.output_summary || "–")}</dd><dt>Error</dt><dd>${esc(s.error || "none")}</dd></dl>`;
+}
+const esc = (t) => String(t).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+
+function watch(id) {
+  if (es) es.close();
+  steps = {}; order.forEach((o) => (steps[o.name] = { name: o.name, label: o.label, status: "pending" })); render();
+  $("tasks").innerHTML = '<li class="tag">Working…</li>';
+  es = new EventSource(`/api/runs/${id}/events`);
+  es.onmessage = (m) => {
+    const e = JSON.parse(m.data);
+    if (e.type === "step") { steps[e.name] = { ...steps[e.name], ...e }; render(); }
+    if (e.type === "done") {
+      es.close(); $("go").disabled = false; $("status").textContent = e.status === "success" ? "Done" : "Failed: " + e.error;
+      if (e.result) $("tasks").innerHTML = e.result.tasks.length
+        ? e.result.tasks.map((t) => `<li>${esc(t.title)} <span class="tag">${t.owner ? "· " + esc(t.owner) : ""} ${t.due ? "· due " + esc(t.due) : ""}</span></li>`).join("") +
+          `<li class="tag">Extracted by: ${e.result.method === "ai" ? "AI" : "rule-based fallback"}</li>`
+        : '<li class="tag">No tasks found.</li>';
+      loadHistory();
+    }
+  };
+}
+async function loadHistory() {
+  const rows = await (await fetch("/api/runs")).json();
+  $("hist").innerHTML = rows.map((r) => `<div data-id="${r.id}"><span>#${r.id} ${esc(r.preview)}…</span><span class="tag">${r.status} · ${r.mode} · ${r.total_ms ? Math.round(r.total_ms) + " ms" : ""}</span></div>`).join("") || '<span class="tag">No runs yet.</span>';
+  document.querySelectorAll("#hist div").forEach((d) => (d.onclick = () => watch(d.dataset.id)));
+}
+$("go").onclick = async () => {
+  $("go").disabled = true; $("status").textContent = "Running…";
+  const r = await fetch("/api/runs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: $("text").value, mode: $("mode").value }) });
+  watch((await r.json()).id);
+};
+$("t-app").onclick = () => { $("app").classList.remove("hidden"); $("how").classList.add("hidden"); $("t-app").classList.add("on"); $("t-how").classList.remove("on"); };
+$("t-how").onclick = () => { $("how").classList.remove("hidden"); $("app").classList.add("hidden"); $("t-how").classList.add("on"); $("t-app").classList.remove("on"); };
+loadPipeline().then(loadHistory);
+</script>
+</body>
+</html>
